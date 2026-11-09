@@ -1,0 +1,59 @@
+
+name: Build macOS Audio Units
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure project
+        run: >-
+          cmake -S . -B build -G Xcode
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+
+      - name: Build plugin and tests
+        run: cmake --build build --config Release --parallel 3
+
+      - name: Run DSP tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package plugins
+        shell: bash
+        run: |
+          mkdir -p package
+
+          find build/UniversalReference_artefacts \
+            -maxdepth 5 -type d -name '*.component' \
+            -exec cp -R '{}' package/ \;
+
+          find build/UniversalReference_artefacts \
+            -maxdepth 5 -type d -name '*.vst3' \
+            -exec cp -R '{}' package/ \;
+
+          test -d "package/Universal Reference.component"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            package UniversalReference-${{ matrix.arch }}.zip
+
+      - name: Upload compiled plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniversalReference-macOS-${{ matrix.arch }}
+          path: UniversalReference-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 30
